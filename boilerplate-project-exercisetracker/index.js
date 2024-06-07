@@ -12,8 +12,12 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
 const Schema = mongoose.Schema;
 const userSchema = new Schema({
   username: { type: String, required: true },
-  count: Number,
-  log: [Object]
+  log: [{
+    description: String,
+    duration: Number,
+    date: String
+  }],
+  count: Number
 });
 
 // Mongoose model
@@ -30,53 +34,74 @@ app.get('/', (req, res) => {
 });
 
 app.route("/api/users").post(async function (req, res) {
-  const { username } = req.body;
-  const result = await User.create({ username });
-  res.json({ username: result.username, _id: result._id });
-}).get(async function(req, res) {
-  const queryResults = await User.find({});
-  console.log("queryResilts", queryResults);
-  const formattedResults = queryResults.map((item) => {
-    return {
-      username: item.username,
-      _id: item._id,
-    }
-  });
-  res.send(formattedResults);
+  const username = req.body.username;
+  const user = await User.create({ username });
+  if (!user) {
+    res.json({ error: "User not found" });
+  } else {
+    res.json(user);
+  }
+}).get(async function (req, res) {
+  const user = await User.find({});
+  if (!user) {
+    res.json({ error: "User not found" });
+  } else {
+    res.json(user);
+  }
 });
 
 app.post("/api/users/:_id/exercises", async function(req, res) {
-  const { _id } = req.params;
-  const { description, duration, date } = req.body;
-  const format_duration = Number(duration);
-  const format_date = date.length === 0? new Date().toDateString(): new Date(date).toDateString();
+  const { _id } = req.params; 
+  const { description, duration, date } = req.body; 
+  const formatted_duration = parseInt(duration);
+  const formatted_date = !date? new Date().toDateString(): new Date(date).toDateString();
+
+  const exercise = {
+    description,
+    duration: formatted_duration,
+    date: formatted_date
+  };
 
   const user = await User.findById({ _id });
-  
-  if (user === null) {
+  if (!user) {
     res.json({ error: "User not found" });
   } else {
-    const exercise = {
-      description, 
-      duration: format_duration,
-      date: format_date
-    };
     user.log.push(exercise);
     user.count = user.log.length;
-    const query = await User.findByIdAndUpdate({ _id }, { username: user.username, count: user.count, _id: user._id, log: user.log }, { new: true, upsert: true });
+    const newUser = await User.findByIdAndUpdate({ _id }, { username: user.username, count: user.count, _id, log: user.log }, { new: true, upsert: true });
     res.json({
-      username: query.username, 
+      username: newUser.username,
       description: exercise.description,
       duration: exercise.duration,
       date: exercise.date,
-      _id: query._id
+      _id
     });
   }
 });
 
 app.get("/api/users/:_id/logs", async function (req, res) {
   const { _id } = req.params; 
-  const user = await User.find({ _})
+  const { from, to, limit } = req.query; 
+  const formatted_from_date = new Date(Date.parse(from)).getTime();
+  const formatted_to_date = new Date(Date.parse(to)).getTime();
+
+  const user = await User.findById({ _id });
+  if (!user) {
+    res.json({ error: "User not found" });
+  } else {
+    if (from || to || limit) {
+      const logs = user.log;
+      const filteredLogs = logs.filter((log) => {
+        const log_date = (new Date(log.date)).toISOString().split("T")[0];
+        return true;
+      });
+
+      const slicedLogs = limit? filteredLogs.slice(0, limit): filteredLogs;
+      user.log = slicedLogs;
+    }
+
+    res.json(user);
+  }
 });
 
 const listener = app.listen(process.env.PORT || 3000, () => {
